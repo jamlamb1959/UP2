@@ -13,11 +13,12 @@ all: mkdir push
 clean:
 	pio run --target clean
 
-mkdir:
+.mkdir:
 	@echo "ssh ${DEST} \"mkdir -p /var/www/html/firmware/$(BNAME)/${PLATFORM}/${PROJ}\""
 	@ssh ${DEST} "mkdir -p /var/www/html/firmware/$(BNAME)/${PLATFORM}/${PROJ}"
+	touch .mkdir
 
-push:
+push: .mkdir
 	@echo "PROJ: ${PROJ}"
 	@echo "PLATFORM: ${PLATFORM}"
 	@echo "DEST: ${DEST}"
