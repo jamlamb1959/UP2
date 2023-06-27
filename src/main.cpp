@@ -1,8 +1,5 @@
-// #define USE_BLUETOOTH
-// #define USE_ESPNOW
-// #define USE_HOTSPOT
 #define USE_OTA
-// #define USE_PUBSUB
+#define USE_PUBSUB
 
 #define USE_WIFI
 
@@ -12,12 +9,17 @@
 #endif
 #endif
 
-// #define USE_AHT10
-// #define USE_MESH
 #define USE_BLINK
 
-#define WAKE    3600
-#define SLEEP   60
+/*
+** Global defines
+*/
+#define MGMT_TOPIC "/MGMT_UP2"
+
+/*
+** the time in seconds to wait before running.
+*/
+#define START_DELAY 1
 
 #define PROG "firmware/main/esp32dev/UP2/firmware"
 
@@ -34,6 +36,26 @@
 
 static Seq * seq_g = Seq::instance();
 
+#ifdef USE_WIFI
+typedef struct
+    {
+    const char * ssid;
+    const char * passwd;
+    const char * firmwareRepo;
+    } WiFiInfo;
+
+static WiFiInfo _wifiInfo[] =
+    {
+    { "s1616", "4026892842", "192.168.11.43" },
+    { "Jimmy-MiFi", "4026892842", "repo.sheepshed.tk" },
+    { "sheepshed-mifi", "4026892842", "repo.sheepshed.tk" },
+    { "lambhome", "4022890568", "192.168.11.43" },
+    { NULL, NULL, NULL }
+    };
+
+static WiFiInfo * _current = NULL;
+#endif
+
 #ifdef USE_OTA
 #include <ESP32httpUpdate.h>
 
@@ -49,10 +71,188 @@ static Seq * seq_g = Seq::instance();
 static void _loadMac();
 static void _setupWiFi();
 
-static char _mac_g[ 20 ];
+static char _mac[ 20 ];
 #endif
 #ifdef USE_OTA
 static void _checkUpdate();
+#endif
+
+#ifdef USE_PUBSUB
+
+static char _buf[ 200 ];
+
+static void _notify(
+        const char * const aFrmt,
+        ...
+        )
+    {
+    va_list ap;
+
+    va_start( ap, aFrmt );
+    vsnprintf( _buf, sizeof( _buf ), aFrmt, ap );
+    va_end( ap );
+
+    Serial.printf( "_notify - %s\r\n", _buf );
+    }
+
+static void _cb(
+        char * aTopic,
+        byte * aPayload,
+        unsigned int aPayloadLen
+        )
+    {
+    char ch;
+    const char * wp;
+
+    int cnt;
+
+    String cmd;
+
+    Serial.printf( "_cb(entered) - aTopic: %s, aPayload: %*.*s\r\n",
+            aTopic, (int) aPayloadLen, aPayloadLen, (char *) aPayload );
+
+    for( cnt = 0, wp = (char *) aPayload; 
+            (cnt < aPayloadLen) && ((ch = wp[ cnt ]) != ' '); cnt ++ )
+        {
+        cmd += ch;
+        }
+
+    Serial.printf( "cmd: %s\r\n", cmd.c_str() );
+
+    if ( cmd == "reboot" )
+        {
+        _notify( "reboot(commanded)" );
+        delay( 1000 );
+        ESP.restart();
+        }
+    }
+
+class MQTT
+        : public Seq::Task
+    {
+  public:
+    MQTT();
+    MQTT( const MQTT & anObj );
+    ~MQTT();
+
+    MQTT & operator = ( const MQTT & anObj );
+
+    void lp();
+    void stp();
+
+  private:
+    void _connect();
+    void _subscribe();
+
+    WiFiClient ivClient;
+    PubSubClient ivMQTT;
+    };
+
+MQTT::MQTT(
+        )
+    {
+    ivMQTT.setClient( ivClient );
+    ivMQTT.setBufferSize( 1024 );
+    ivMQTT.setServer( "pharmdata.ddns.net", 1883 );
+    ivMQTT.setCallback( _cb );
+
+    seq_g->reg( *this );
+    }
+
+MQTT::MQTT( 
+        const MQTT & anObj 
+        )
+    {
+    (void) anObj;
+    }
+
+MQTT::~MQTT(
+        )
+    {
+    }
+
+MQTT & MQTT::operator = ( 
+        const MQTT & anObj 
+        )
+    {
+    if ( this != &anObj )
+        {
+        }
+
+    return *this;
+    }
+
+void MQTT::lp(
+        )
+    {
+    if ( _current != NULL )
+        {
+        if ( ! ivMQTT.connected() )
+            {
+            _connect();
+            }
+
+        ivMQTT.loop();
+        }
+
+    }
+
+void MQTT::stp(
+        )
+    {
+    }
+
+void MQTT::_connect(
+        )
+    {
+    static unsigned long _nxtTry = 0;
+
+    String clientId;
+
+    unsigned long et;
+
+    clientId = "c-";
+    clientId += _mac;
+
+    if ( _current == NULL )
+        {
+        return;
+        }
+
+    if ( (_nxtTry != 0) && (millis() < _nxtTry) )
+        {
+        return;
+        }
+
+
+    
+    for( et = millis() + (10*1000); millis() < et; )
+        {
+        if ( ivMQTT.connected() )
+            {
+            _subscribe();
+            return;
+            }
+
+        if ( ivMQTT.connect( clientId.c_str() ) )
+            {
+            _subscribe();
+            return;
+            }
+
+        delay( 1000 );
+        }
+
+    Serial.printf( "(%d) _connect FAILED\r\n", __LINE__ );
+    _nxtTry = millis() + (300*1000);
+    }
+
+void MQTT::_subscribe(
+        )
+    {
+    ivMQTT.subscribe( MGMT_TOPIC );
+    }
+
 #endif
 
 #ifdef USE_BLINK
@@ -88,6 +288,8 @@ Blink::Blink(
         , ivNxtTime( 0 )
     {
     Serial.println( "Blink::Blink(entered)" );
+
+    pinMode( LED, OUTPUT );
 
     seq_g->reg( *this );
     }
@@ -132,7 +334,6 @@ void Blink::stp(
     {
     Serial.println( "Blink::stp(entered)" );
 
-    pinMode( LED, OUTPUT );
     digitalWrite( LED, LOW );
     }
 
@@ -144,11 +345,87 @@ void Blink::swtch(
     }
 #endif
 
+#ifdef USE_PUBSUB_old
+static std::string _clientId;
+static std::string _topic;
+
+static void _cb(
+        char * aTopic,
+        byte * aPayload,
+        unsigned int aPayloadLen
+        )
+    {
+    char ch;
+
+    String cmd;
+
+    Serial.printf( "_cb(entered) - aTopic: %s, aPayload: %*.*s\r\n",
+            aTopic, (int) aPayloadLen, aPayloadLen, (char *) aPayload );
+    }
+
+static void _setupPubSub(
+        )
+    {
+    if ( _current != NULL )
+        {
+        std::string topic;
+
+        _mqtt.setBufferSize( 1024 );
+
+        _topic = "/RPT/";
+        _topic += _mac;
+        
+        topic = "/BOOTMSG/";
+        topic += _mac;
+        
+        _clientId = "C-";
+        _clientId += _mac;
+
+        _mqtt.setServer( "pharmdata.ddns.net", 1883 );
+        _mqtt.setCallback( _cb );
+
+        _mqttConnect();
+
+        if ( _mqtt.connected() )
+            {
+            char buf[ 10 ];
+
+            std::string msg;
+            uint64_t et;
+
+            msg = "{\"PROG\":\"";
+            msg += PROG;
+            msg += "\",\"COMPILE\":\"";
+            msg += __DATE__;
+            msg += " ";
+            msg += __TIME__;
+            msg += "\",\"SSID\":\"";
+            msg += _current->ssid;
+            msg += "}";
+
+            _mqtt.publish( topic.c_str(), msg.c_str() );
+
+            for( et = millis() + 10000; millis() < et; )
+                {
+                _mqtt.loop();
+                delay( 100 );
+                }
+            }
+        else
+            {
+            Serial.printf( "_mqttConnect failed.\r\n" );
+            }
+        }
+    }
+#endif
 void setup(
         )
     {
 #ifdef USE_BLINK
     static Blink b;
+#endif
+#ifdef USE_PUBSUB
+    static MQTT mqttm;
 #endif
 
     seq_g->stp();
@@ -161,14 +438,14 @@ void setup(
     Serial.begin( 115200 );
     delay( 1000 );
 
-    for( cntDown = 10; cntDown > 0; cntDown -- )
+    for( cntDown = START_DELAY; cntDown > 0; cntDown -- )
         {
         Serial.printf( " %d", cntDown );
         delay( 1000 );
         b.swtch();
         }
 
-    Serial.printf( "\r\nCompile: " __DATE__ " " __TIME__ ", mac: %s\r\n", _mac_g );
+    Serial.printf( "\r\nCompile: " __DATE__ " " __TIME__ ", mac: %s\r\n", _mac );
 
 #ifdef USE_WIFI
     _setupWiFi();
@@ -177,7 +454,6 @@ void setup(
 #ifdef USE_OTA
     _checkUpdate();
 #endif
-
     }
 
 void loop(
@@ -522,24 +798,6 @@ class AdvCB
     };
 #endif
 
-typedef struct
-    {
-    const char * ssid;
-    const char * passwd;
-    const char * firmwareRepo;
-    } WiFiInfo;
-
-WiFiInfo wifiInfo_g[] =
-    {
-    { "s1616", "4026892842", "192.168.11.43" },
-    { "Jimmy-MiFi", "4026892842", "repo.sheepshed.tk" },
-    { "sheepshed-mifi", "4026892842", "repo.sheepshed.tk" },
-    { "lambhome", "4022890568", "192.168.11.43" },
-    { NULL, NULL, NULL }
-    };
-
-static WiFiInfo * current_g = NULL;
-
 #ifdef USE_OTA
 static void _progress(
         size_t aDone,
@@ -553,13 +811,13 @@ static void _progress(
 
     cntr ++;
 
-    if ( (cntr % 10) == 0 )
+    if ( (cntr % 5) == 0 )
         {
         size_t pct10;
 
         pct10 = (aDone * 1000) /aTotal;
 
-        Serial.printf( "%u/%u(%%%d.%d)\r", aDone, aTotal, pct10 / 10, pct10 % 10 );
+        Serial.printf( "\r%u/%u(%%%d.%d)", aDone, aTotal, pct10 / 10, pct10 % 10 );
         }
     }
 
@@ -567,15 +825,15 @@ static void _checkUpdate(
         )
     {
     Serial.printf( "(%d) _checkUpdate - (repo: %s) file: %s\r\n", 
-            __LINE__, (current_g != NULL) ? current_g->firmwareRepo : "NULL", PROG );
+            __LINE__, (_current != NULL) ? _current->firmwareRepo : "NULL", PROG );
 
-    if ( current_g != NULL )
+    if ( _current != NULL )
         {
         Update.onProgress( _progress );
 
         ESPhttpUpdate.rebootOnUpdate( true );
 
-        t_httpUpdate_return ret = ESPhttpUpdate.update( current_g->firmwareRepo, 80,
+        t_httpUpdate_return ret = ESPhttpUpdate.update( _current->firmwareRepo, 80,
                 "/firmware/update.php", PROG );
 
         if ( ESPhttpUpdate.getLastError() != 0 )
@@ -630,11 +888,11 @@ static void _setupWiFi(
 
     int cnt;
 
-    for( current_g = wifiInfo_g; current_g->ssid != NULL; current_g ++ )
+    for( _current = _wifiInfo; _current->ssid != NULL; _current ++ )
         {
-        Serial.printf( "'%s', Attempt to attach.\r\n", current_g->ssid );
+        Serial.printf( "'%s', Attempt to attach.\r\n", _current->ssid );
 
-        WiFi.begin( current_g->ssid, current_g->passwd );
+        WiFi.begin( _current->ssid, _current->passwd );
 
         for( cnt = 0; (cnt < 100) && (WiFi.status() != WL_CONNECTED); cnt ++ )
             {
@@ -648,34 +906,45 @@ static void _setupWiFi(
 
         if ( WiFi.status() == WL_CONNECTED )
             {
-            Serial.printf( "'%s', CONNECTED\r\n", current_g->ssid );
+            Serial.printf( "'%s', CONNECTED\r\n", _current->ssid );
             break;
             }
         }
 
-    if ( current_g->ssid == NULL )
+    if ( _current->ssid == NULL )
         {
         Serial.printf( "Unable to attach to wifi.\r\n" );
 
-        current_g = NULL;
+        _current = NULL;
         return;
         }
     }
 #endif
 
-#ifdef USE_PUBSUB
-static WiFiClient clnt_g;
-PubSubClient mqtt_g( clnt_g );
+#ifdef USE_PUBSUB_OLD
+static void _subscribe(
+        )
+    {
+    String channel;
 
-static std::string clientId_g;
-std::string topic_g;
+    channel = "/MGMT";
+    ivMQTT.subscribe( channel.c_str() );
+
+    return;
+/*
+    channel += "/";
+    channel += _mac;
+
+    _mqtt.subscribe( channel.c_str() );
+*/
+    }
 
 static void _mqttConnect(
         )
     {
     static unsigned long nxtTry = 0;
 
-    if ( current_g == NULL )
+    if ( _current == NULL )
         {
         return;
         }
@@ -683,7 +952,6 @@ static void _mqttConnect(
     if ( (nxtTry != 0) && (millis() < nxtTry) )
         {
         Serial.printf( "(%d) _mqttConnect(too soon)\r\n", __LINE__ );
-
         return;
         }
 
@@ -691,13 +959,15 @@ static void _mqttConnect(
 
     for( et = millis() + (10*1000); millis() < et; )
         {
-        if ( mqtt_g.connected() )
+        if ( _mqtt.connected() )
             {
+            _subscribe();
             return;
             }
 
-        if ( mqtt_g.connect( clientId_g.c_str() ) )
+        if ( _mqtt.connect( _clientId.c_str() ) )
             {
+            _subscribe();
             return;
             }
 
@@ -715,7 +985,7 @@ static void _loadMac(
     uint8_t rm[ 6 ];
 
     WiFi.macAddress( rm );
-    sprintf( _mac_g, "%02X:%02X:%02X:%02X:%02X:%02X",
+    sprintf( _mac, "%02X:%02X:%02X:%02X:%02X:%02X",
             rm[ 0 ], rm[ 1 ], rm[ 2 ], 
             rm[ 3 ], rm[ 4 ], rm[ 5 ] );
     }
@@ -870,160 +1140,6 @@ void _runSF(
         }
     }
 
-#ifdef USE_MESH
-Scheduler userScheduler;
-
-typedef std::function<void(String &from, String &msg)> namedReceivedCallback_t;
-
-class MeshWrapper 
-        : public painlessMesh
-    {
-  public:
-    MeshWrapper(
-            ) 
-        {
-        auto cb = [this](
-                uint32_t aFromAddr, String & aMsg
-                ) 
-            {
-            static SM * sm = SM::instance();
-
-            if ( aMsg == "GW" )
-                {
-                painlessMesh::sendSingle( aFromAddr, String( "IM" ) );
-                if ( sm->getVerbose() )
-                    {
-                    Serial.printf( "Sent IM - to: %u(0x%X)\n",
-                            aFromAddr, aFromAddr );
-                    }
-                return;
-                }
-
-            if ( sm->getVerbose() > 1 )
-                {
-                Serial.printf( "cb -> (0x%X) - %s\n",
-                        aFromAddr, aMsg.c_str() );
-                }
-
-            if ( SMPUB_g != NULL )
-                {
-                if ( uxQueueSpacesAvailable( SMPUB_g ) > 0 )
-                    {
-                    Msg * m = new Msg( Msg::t_pub );
-                    m->ivPayload = aMsg.c_str();
-                    xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
-                    }
-                }
-            };
-
-            painlessMesh::onReceive( cb );
-            }
-
-        String getName(
-                ) 
-            {
-            return nodeName;
-            }
-
-        void setName(
-                String &name
-                ) 
-            {
-            nodeName = name;
-            }
-
-        using painlessMesh::sendSingle;
-
-        bool sendSingle(
-                String &aName, 
-                String &aMsg
-                ) 
-            {
-            // Look up name
-            for (auto && pr : nameMap) 
-                {
-                if (aName.equals(pr.second)) 
-                    {
-                    uint32_t to = pr.first;
-                    return painlessMesh::sendSingle(to, aMsg);
-                    }
-                }
-            return false;
-            }
-
-        virtual void stop() 
-            {
-            painlessMesh::stop();
-            }
-
-        virtual void onReceive(
-                painlessmesh::receivedCallback_t onReceive
-                ) 
-            {
-            userReceivedCallback = onReceive;
-            }
-
-        void onReceive(
-                namedReceivedCallback_t onReceive
-                ) 
-            {
-            userNamedReceivedCallback = onReceive;
-            }
-    
-  protected:
-    String nodeName;
-    std::map<uint32_t, String> nameMap;
-
-    painlessmesh::receivedCallback_t userReceivedCallback;
-    namedReceivedCallback_t          userNamedReceivedCallback;
-    };
-
-static bool connected_g = false;
-static MeshWrapper mesh;
-static String nodeName_g;
-
-static void _setupMesh(
-        )
-    {
-    WiFi.disconnect( false, true );
-
-    current_g = NULL;
-
-    mesh.setDebugMsgTypes( ERROR );
-
-    mesh.init( MESH_SSID, MESH_PASSWORD, &userScheduler, MESH_PORT, WIFI_AP_STA, 6 );
-
-    mesh.setName( nodeName_g );
-
-    mesh.onReceive( []( 
-            uint32_t aFrom, 
-            String & aMsg
-            )
-        {
-/*
-        Serial.printf( "\nonReceive - aFrom: 0x%X, %s\n\n",
-                aFrom, aMsg.c_str() );
-*/
-        } );
-
-    mesh.onReceive( []( 
-            String & aFrom, 
-            String & aMsg
-            )
-        {
-/*
-        Serial.printf( "\nonReceive - aFrom: %s, %s\n\n",
-                aFrom.c_str(), aMsg.c_str() );
-*/
-        } );
-
-    mesh.onChangedConnections( []() 
-        {
-        connected_g = true;
-        } );
-    }
-#endif
-
 void setup(
         ) 
     {
@@ -1033,7 +1149,7 @@ void setup(
 
     Serial.begin( 115200 );
     delay( 1000 );
-    Serial.printf( "Compile: " __DATE__ " " __TIME__ ", mac: %s\r\n", _mac_g );
+    Serial.printf( "Compile: " __DATE__ " " __TIME__ ", mac: %s\r\n", _mac );
 
     qMut_g = xSemaphoreCreateMutex();
     pinMode( LED, OUTPUT );
@@ -1057,7 +1173,6 @@ void setup(
 #endif
 
 #ifdef USE_OTA
-    Serial.printf( "_checkUpdate\r\n" );
     _checkUpdate();
 #endif
 
@@ -1089,25 +1204,25 @@ void setup(
 #endif
 
 #ifdef USE_PUBSUB
-    if ( current_g != NULL )
+    if ( _current != NULL )
         {
         std::string topic;
 
-        mqtt_g.setBufferSize( 1024 );
+        _mqtt.setBufferSize( 1024 );
 
-        topic_g = "/RPT/";
-        topic_g += _mac_g;
+        _topic = "/RPT/";
+        _topic += _mac;
         
         topic = "/BOOTMSG/";
-        topic += _mac_g;
+        topic += _mac;
         
-        clientId_g = "C-";
-        clientId_g += _mac_g;
+        _clientId = "C-";
+        _clientId += _mac;
 
-        mqtt_g.setServer( "pharmdata.ddns.net", 1883 );
+        _mqtt.setServer( "pharmdata.ddns.net", 1883 );
         _mqttConnect();
 
-        if ( mqtt_g.connected() )
+        if ( _mqtt.connected() )
             {
             char buf[ 10 ];
 
@@ -1121,17 +1236,14 @@ void setup(
             msg += " ";
             msg += __TIME__;
             msg += "\",\"SSID\":\"";
-            msg += current_g->ssid;
-            msg += "\",\"WAKE\":";
-            sprintf( buf, "%d", WAKE );
-            msg += buf;
+            msg += _current->ssid;
             msg += "}";
 
-            mqtt_g.publish( topic.c_str(), msg.c_str() );
+            _mqtt.publish( topic.c_str(), msg.c_str() );
 
             for( et = millis() + 10000; millis() < et; )
                 {
-                mqtt_g.loop();
+                _mqtt.loop();
                 delay( 100 );
                 }
             }
@@ -1170,7 +1282,7 @@ void setup(
     Serial.printf( "(%d) - err: %d\r\n", __LINE__, (int) err );
 
 
-    if ( current_g != NULL )
+    if ( _current != NULL )
         {
         checkUpdateTime_g = millis() + (CHECKUPDATEINV * 1000);
         }
@@ -1183,16 +1295,6 @@ void setup(
     _setupMesh();
 #endif
 
-#ifdef USE_HOTSPOT
-#endif
-
-    /*
-    ** start the State Flow.
-    */
-    xTaskCreate( _runSF, "SF", 2500, 0, (tskIDLE_PRIORITY + 1), NULL );
-
-    esp_sleep_enable_timer_wakeup( SLEEP * 1000000 );
-    nxtSleep_g = millis() + WAKE * 1000;
     }
 
 #ifdef USE_BLUETOOTH
@@ -1336,14 +1438,14 @@ static void _getData(
                 if ( reported.find( uuid ) == reported.end() )
                     {
 #ifdef USE_PUBSUB
-                    if ( mqtt_g.connected() )
+                    if ( _mqtt.connected() )
                         {
                         char buf[ 150 ];
 
                         sprintf( buf, "(%d) uuid: %s, addr: %s, name: %s", __LINE__,
                                 uuid.c_str(), clnt->getPeerAddress().toString().c_str(),
                                 aDevice->getName().c_str() );
-                        mqtt_g.publish( topic_g.c_str(), buf );
+                        _mqtt.publish( _topic.c_str(), buf );
 
                         Serial.printf( "%s\r\n", buf );
                         }
@@ -1381,9 +1483,9 @@ static void _getData(
                     chCnt ++;
 
 #ifdef USE_PUBSUB
-                    if ( mqtt_g.connected() )
+                    if ( _mqtt.connected() )
                         {
-                        mqtt_g.publish( topic_g.c_str(), buf );
+                        _mqtt.publish( _topic.c_str(), buf );
                         }
 #endif
 
@@ -1436,10 +1538,10 @@ static void _prcs(
         Serial.printf( "R: '%s'\r\n", aLin.c_str() );
         }
 
-    if ( current_g != NULL )
+    if ( _current != NULL )
         {
 #ifdef USE_PUBSUB
-        if ( (current_g != NULL) && (mqtt_g.connected()) )
+        if ( (_current != NULL) && (_mqtt.connected()) )
             {
             std::string buf;
 
@@ -1447,7 +1549,7 @@ static void _prcs(
             buf += aLin;
             buf += "'";
 
-            if ( !mqtt_g.publish( topic_g.c_str(), buf.c_str() ) )
+            if ( !_mqtt.publish( _topic.c_str(), buf.c_str() ) )
                 {
                 Serial.printf( "(%d) publish returned false.\r\n", __LINE__ );
                 }
@@ -1634,16 +1736,16 @@ void loop(
     /*
     ** makes no sense without wifi
     */
-    if ( current_g != NULL )
+    if ( _current != NULL )
         {
-        if ( ! mqtt_g.connected() )
+        if ( ! _mqtt.connected() )
             {
             _mqttConnect();
             }
     
-        if ( mqtt_g.connected() )
+        if ( _mqtt.connected() )
             {
-            mqtt_g.loop();
+            _mqtt.loop();
             }
         }
 #endif
@@ -1718,7 +1820,7 @@ void loop(
 
 
         sprintf( buf, "{\"MAC\":\"%s\",\"CNT\":%u,\"F\":%.1f,\"H\":%.1f}", 
-                _mac_g, cnt, f, h );
+                _mac, cnt, f, h );
 #ifdef USE_PUBSUB
         if ( pubSub_g->depth() == pubSub_g->capacity() )
             {
@@ -1735,12 +1837,12 @@ void loop(
 #endif
 
 #ifdef USE_PUBSUB
-    while( (mqtt_g.connected()) && (pubSub_g->depth() != 0) )
+    while( (_mqtt.connected()) && (pubSub_g->depth() != 0) )
         {
         std::string v = pubSub_g->pop();
 
         Serial.printf( "pub: %s\r\n", v.c_str() );
-        mqtt_g.publish( topic_g.c_str(), v.c_str() );
+        _mqtt.publish( _topic.c_str(), v.c_str() );
         }
 #endif
 
@@ -1811,7 +1913,7 @@ void AdvCB::onResult(
     resultCntr_g ++;
 
 #ifdef USE_PUBSUB
-    if ( mqtt_g.connected() )
+    if ( _mqtt.connected() )
         {
         if ( reported.find( aDevice->getName() ) == reported.end() )
             {
@@ -1823,7 +1925,7 @@ void AdvCB::onResult(
                 {
                 sprintf( buf, "Device: %s", aDevice->getName().c_str() );
 
-                mqtt_g.publish( topic_g.c_str(), buf );
+                _mqtt.publish( _topic.c_str(), buf );
                 }
             }
         }
