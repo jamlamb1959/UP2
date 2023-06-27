@@ -1,2 +1,2 @@
-# UP2
-Rebuild of uplink based on Seq.
+# UPLINK_MESH
+Interface between painlessmesh and cellular
