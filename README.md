@@ -3,4 +3,6 @@ So this will be the start of a program that will provide a "hotspot" SSID: GW th
 internet.
 
 # Build
-This packages uses platformio(pio) so The Jenkins file assumes it is installed.
+This packages uses platformio(pio).
+Using github.com build runner that assumes the runner is running in the local
+environment(look at makefile.yml for details.)
