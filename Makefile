@@ -22,9 +22,6 @@ push: .mkdir
 	@echo "PROJ: ${PROJ}"
 	@echo "PLATFORM: ${PLATFORM}"
 	@echo "DEST: ${DEST}"
-	env | sort
-	export PATH=${PATH}:${HOME}/.local/bin
-	env | sort
 	PATH=${PATH}:${HOME}/.local/bin ; pio run
 	scp .pio/build/${PLATFORM}/firmware.bin ${DEST}:/var/www/html/firmware/$(BNAME)/${PLATFORM}/${PROJ}/firmware.bin
 
