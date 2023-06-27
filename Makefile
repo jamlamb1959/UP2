@@ -22,9 +22,9 @@ push:
 	@echo "PLATFORM: ${PLATFORM}"
 	@echo "DEST: ${DEST}"
 	env | sort
-	export PATH=${PATH}:~/.local/bin
-	which pio
+	export PATH=${PATH}:${HOME}/.local/bin
 	env | sort
+	which pio
 	pio run
 	scp .pio/build/${PLATFORM}/firmware.bin ${DEST}:/var/www/html/firmware/$(BNAME)/${PLATFORM}/${PROJ}/firmware.bin
 
