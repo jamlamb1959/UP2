@@ -13,7 +13,7 @@ export PATH=${PATH}:${HOME}/.local/bin
 
 echo "BRANCH_NAME: ${BRANCH_NAME}"
 
-make
+make push
 '''
       }
     }
