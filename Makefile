@@ -24,7 +24,7 @@ push:
 	env | sort
 	export PATH=${PATH}:${HOME}/.local/bin
 	env | sort
-	pio run
+	PATH=${PATH}:${HOME}/.local/bin ; pio run
 	scp .pio/build/${PLATFORM}/firmware.bin ${DEST}:/var/www/html/firmware/$(BNAME)/${PLATFORM}/${PROJ}/firmware.bin
 
 upload:
