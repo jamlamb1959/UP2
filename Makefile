@@ -19,8 +19,9 @@ mkdir:
 
 push:
 	@echo "PROJ: ${PROJ}"
-	@echo "PLATFORM: ${PLATFORM}"
-	@pio run
+@echo "PLATFORM: ${PLATFORM}"
+	export PATH=${PAth}:~/.local/bin
+	pio run
 	scp .pio/build/${PLATFORM}/firmware.bin ${DEST}:/var/www/html/firmware/$(BNAME)/${PLATFORM}/${PROJ}/firmware.bin
 
 upload:
