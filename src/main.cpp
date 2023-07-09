@@ -1,5 +1,9 @@
+#define USE_HTTPSERVER
 #define USE_OTA
 #define USE_PUBSUB
+
+#define USE_SOFTAP
+#define USE_SOFTAP_CB
 
 #define USE_WIFI
 
@@ -24,15 +28,24 @@
 #define PROG "firmware/main/esp32dev/UP2/firmware"
 
 #include <Arduino.h>
-
+#include <HardwareSerial.h>
 #include <map>
 #include <string>
 
-#include <Seq.h>
+#include <Fifo.h>
+#include <Msg.h>
+#include <SENG.h>
+#include <SeqLib.h>
 #include <SPI.h>
+#include <TknDB.h>
 
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <Wire.h>
+
+#ifdef USE_HTTPSERVER
+#include <ESPAsyncWebServer.h>
+#endif
 
 static Seq * seq_g = Seq::instance();
 
@@ -121,7 +134,7 @@ static void _cb(
 
     if ( cmd == "reboot" )
         {
-        _notify( "reboot(commanded)" );
+        _notify( "reboot - mqtt message" );
         delay( 1000 );
         ESP.restart();
         }
@@ -138,6 +151,7 @@ class MQTT
     MQTT & operator = ( const MQTT & anObj );
 
     void lp();
+    void publish( const char * aTopic, const char * aPayload, ... );
     void stp();
 
   private:
@@ -223,8 +237,6 @@ void MQTT::_connect(
         {
         return;
         }
-
-
     
     for( et = millis() + (10*1000); millis() < et; )
         {
@@ -253,95 +265,29 @@ void MQTT::_subscribe(
     ivMQTT.subscribe( MGMT_TOPIC );
     }
 
-#endif
-
-#ifdef USE_BLINK
-
-#define BLINKINV_MSEC_l 1000
-
-#define LED         2
-
-class Blink
-        : public Seq::Task
-    {
-  public:
-    Blink();
-    Blink( const Blink & anObj );
-    ~Blink();
-
-    Blink & operator = ( const Blink & anObj );
-
-    void lp();
-    void stp();
-
-    void swtch();
-
-  private:
-    bool ivState;
-
-    unsigned long int ivNxtTime;
-    };
-
-Blink::Blink(
-        )
-        : ivState( false )
-        , ivNxtTime( 0 )
-    {
-    Serial.println( "Blink::Blink(entered)" );
-
-    pinMode( LED, OUTPUT );
-
-    seq_g->reg( *this );
-    }
-
-Blink::Blink( 
-        const Blink & anObj 
-        )
-        : ivState( false )
-        , ivNxtTime( 0 )
-    {
-    }
-
-Blink::~Blink(
+void MQTT::publish( 
+        const char * aTopic, 
+        const char * aFrmt, 
+        ... 
         )
     {
-    }
+    char buf[ 200 ];
 
-Blink & Blink::operator = ( 
-        const Blink & anObj 
-        )
-    {
-    if ( this != &anObj )
+    va_list ap;
+
+    va_start( ap, aFrmt );
+    vsnprintf( buf, sizeof( buf ), aFrmt, ap );
+    va_end( ap );
+
+    if ( ! ivMQTT.connected() )
         {
+        _connect();
         }
 
-    return *this;
-    }
-
-void Blink::lp(
-        )
-    {
-    if ( millis() > ivNxtTime )
+    if ( ivMQTT.connected() )
         {
-        ivNxtTime = millis() + BLINKINV_MSEC_l;
-
-        swtch();
+        ivMQTT.publish( aTopic, buf );
         }
-    }
-
-void Blink::stp(
-        )
-    {
-    Serial.println( "Blink::stp(entered)" );
-
-    digitalWrite( LED, LOW );
-    }
-
-void Blink::swtch(
-            )
-    {
-    digitalWrite( LED, ivState ? HIGH : LOW );
-    ivState = ! ivState;
     }
 #endif
 
@@ -418,17 +364,848 @@ static void _setupPubSub(
         }
     }
 #endif
+#ifdef USE_SOFTAP_CB
+static void _softAP_cb(
+        WiFiEvent_t anEvent
+        )
+    {
+    Serial.printf( "_softAP_cb(entered) anEvent: %d\r\n", anEvent );
+
+    switch ( anEvent )
+        {
+        case SYSTEM_EVENT_STA_CONNECTED:
+            Serial.println( "SYSTEM_EVENT_STA_CONNECTED" );
+            break;
+
+        case SYSTEM_EVENT_AP_START:
+            Serial.println( "SYSTEM_EVENT_AP_START" );
+            break;
+
+        case SYSTEM_EVENT_AP_STACONNECTED:
+            Serial.println( "SYSTEM_EVENT_AP_STACONNECTED" );
+            break;
+
+        case SYSTEM_EVENT_AP_STADISCONNECTED:
+            Serial.println( "SYSTEM_EVENT_AP_STADISCONNECTED" );
+            break;
+
+        default:
+            Serial.println( "default:" );
+            break;
+        }
+    }
+#endif
+
+#if defined( USE_PUBSUB ) || defined( USE_HTTPSERVER )
+static MQTT _mqtt;
+#endif
+
+class UDPSeq
+        : public Seq::Task
+    {
+  public:
+    UDPSeq( const int aPort = 1959 );
+    UDPSeq( const UDPSeq & anObj );
+    ~UDPSeq();
+
+    UDPSeq & operator = ( const UDPSeq & anObj );
+
+    void lp();
+    void stp();
+
+  private:
+    int ivPort;
+
+    WiFiUDP ivUDP;
+    };
+
+UDPSeq::UDPSeq(
+        const int aPort
+        )
+        : ivPort( aPort )
+    {
+    Serial.println( "UDPSeq::UDP(entered)" );
+
+    seq_g->reg( *this );
+    }
+
+UDPSeq::UDPSeq( 
+        const UDPSeq & anObj 
+        )
+    {
+    (void) anObj;
+    }
+
+UDPSeq::~UDPSeq(
+        )
+    {
+    }
+
+UDPSeq & UDPSeq::operator = ( 
+        const UDPSeq & anObj 
+        )
+    {
+    if ( this != &anObj )
+        {
+        }
+
+    return *this;
+    }
+
+void UDPSeq::lp(
+        )
+    {
+    char pktBuffer[ 256 ];
+
+    int ln;
+    int pktSize;
+
+    while( (pktSize = ivUDP.parsePacket()) != 0 )
+        {
+        Serial.print( "pktSize: " ); Serial.println( pktSize );
+
+        IPAddress remoteIp = ivUDP.remoteIP();
+        Serial.print( "remoteIp: " ); Serial.println( remoteIp );
+        
+        ln = ivUDP.read( pktBuffer, sizeof( pktBuffer ) );
+        if ( ln > 0 )
+            {
+            pktBuffer[ ln ] = '\0';
+            Msg * m = new Msg( Msg::t_pub );
+            m->ivPayload = pktBuffer;
+            xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+            }
+        }
+    }
+
+void UDPSeq::stp(
+        )
+    {
+    Serial.printf( "UDPSeq.stp(entered) - ivPort: %d\r\n", ivPort );
+
+    IPAddress ip = WiFi.localIP();
+    Serial.print( "ip: " ); Serial.println( ip );
+
+    ivUDP.begin( ivPort );
+    }
+
+static UDPSeq _udp( 1959 );
+
+class SER
+        : public Seq::Task
+    {
+  public:
+    SER();
+    SER( const SER & anObj );
+    ~SER();
+
+    SER & operator = ( const SER & anObj );
+
+    void lp();
+    void stp();
+
+  private:
+    std::string ivLin;
+    };
+
+SER::SER(
+        )
+    {
+    Serial.println( "SER::SER(entered)" );
+
+    seq_g->reg( *this );
+    }
+
+SER::SER( 
+        const SER & anObj 
+        )
+    {
+    (void) anObj;
+    }
+
+SER::~SER(
+        )
+    {
+    }
+
+SER & SER::operator = ( 
+        const SER & anObj 
+        )
+    {
+    if ( this != &anObj )
+        {
+        }
+
+    return *this;
+    }
+
+#define SIGNAL( sigVal ) sm->signal( sigVal ); return
+
+static void _prcs(
+        const std::string & aLin
+        )
+    {
+    static CS * cs = CS::instance();
+    static SM * sm = SM::instance();
+    static SQ * sq = SQ::instance();
+    static TknDB * tdb = TknDB::instance();
+
+    char ch;
+
+    std::string msg;
+
+    if ( sm->getVerbose() )
+        {
+        Serial.printf( "R: '%s'\r\n", aLin.c_str() );
+        }
+
+    if ( _current != NULL )
+        {
+#ifdef USE_PUBSUB_OLD
+        if ( (_current != NULL) && (_mqtt.connected()) )
+            {
+            std::string buf;
+
+            buf = "R: '";
+            buf += aLin;
+            buf += "'";
+
+            if ( !_mqtt.publish( _topic.c_str(), buf.c_str() ) )
+                {
+                Serial.printf( "(%d) publish returned false.\r\n", __LINE__ );
+                }
+            }
+#endif
+        }
+
+    if ( aLin == "AT" )
+        {
+        SIGNAL( "at" );
+        }
+
+    if ( aLin == "OK" )
+        {
+        SIGNAL( "ok" );
+        }
+
+    if ( aLin == "ERROR" )
+        {
+        SIGNAL( "error" );
+        }
+
+    if ( aLin == "RDY" )
+        {
+        SIGNAL( "rdy" );
+        }
+
+    if (
+            (memcmp( aLin.c_str(), "+SMSUB: ", 8 ) == 0)
+            )
+        {
+        const char * wp;
+
+        std::string tknName;
+
+        wp = aLin.c_str();
+        wp ++;
+
+        for( ; *wp != '\0';  wp ++ )
+            {
+            if ( *wp == ':' )
+                {
+                break;
+                }
+
+            if ( *wp == ' ' )
+                {
+                tknName += '-';
+                continue;
+                }
+
+            tknName += *wp;
+            }
+
+        if ( wp != NULL )
+            {
+            std::string val( wp + 2 );
+
+            tdb->put( tknName, val );
+
+            Serial.printf( "%s(%d): tknName: %s, val: %s\n", __FILE__, __LINE__, 
+                    tknName.c_str(), val.c_str() );
+            }
+        else
+            {
+            Serial.printf( "%s(%d): '%s' (malformed)\r\n", __FILE__, __LINE__, aLin.c_str() );
+            }
+
+        if ( SMPUB_g != NULL )
+            {
+            Msg * m = new Msg( Msg::t_smpub );
+            xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+            }
+        }
+
+    if ( (aLin == "SMS Ready")
+            || (aLin == "ATE0") 
+            || (memcmp( aLin.c_str(), "DST:" , 4 ) == 0)
+            || (memcmp( aLin.c_str(), "AT+CFUN=", 8 ) == 0)
+            )
+        {
+        if ( sm->getVerbose() )
+            {
+            Serial.printf( "RECEIVE: %s, (ignored)\r\n", aLin.c_str() );
+            }
+
+        return;
+        }
+
+    if ( aLin == "> " )
+        {
+        {
+        msg = sq->pop();
+        }
+
+    
+        if ( sm->getVerbose() )
+            {
+            Serial.printf( "(prompted) S: (%u) %s\r\n", msg.length(), msg.c_str() );
+            }
+
+        Serial2.print( msg.c_str() ); Serial2.print( "\r\n" );
+
+/*
+        (void) uart_write_bytes( UART_NUM_2, msg.c_str(), msg.length() );
+        (void) uart_write_bytes( UART_NUM_2, "\r\n", 2 );
+*/
+
+        return;
+        }
+
+    ch = aLin[ 0 ];
+
+    if ( (ch == '+') || (ch == '*') )
+        {
+        const char * wp;
+
+        std::string tknName;
+
+        wp = aLin.c_str();
+        wp ++;
+
+        for( ; *wp != '\0';  wp ++ )
+            {
+            if ( *wp == ':' )
+                {
+                break;
+                }
+
+            if ( *wp == ' ' )
+                {
+                tknName += '-';
+                continue;
+                }
+
+            tknName += *wp;
+            }
+
+        if ( wp != NULL )
+            {
+            std::string val( wp + 2 );
+
+            tdb->put( tknName, val );
+            }
+        else
+            {
+            Serial.printf( "%s(%d): '%s' (malformed)\r\n", __FILE__, __LINE__, aLin.c_str() );
+            }
+
+        return;
+        }
+
+
+    {
+    while ( cs->depth() >= 5 )
+        {
+        Serial.printf( "pop to make room.\r\n" );
+        cs->pop();
+        }
+
+    cs->push( aLin );
+    Serial.printf( "%s(%d) - push( '%s' )\r\n", __FILE__, __LINE__, aLin.c_str() );
+    }
+
+    if ( aLin.length() != 0 )
+        {
+        Serial.printf( "%s(%d): '%s' (push: %u)\r\n", 
+             __FILE__, __LINE__, aLin.c_str(), cs->depth() );
+        }
+    }
+
+void SER::lp(
+        )
+    {
+    char ch;
+
+    while( Serial2.available() )
+        {
+        ch = Serial2.read();
+
+        if ( strchr( "\r\n", ch ) != NULL )
+            {
+            if ( ivLin.length() != 0 )
+                {
+                _prcs( ivLin );
+                ivLin.clear();
+                }
+            }
+        else
+            {
+            ivLin += ch;
+            if ( ivLin == "> " )
+                {
+                _prcs( ivLin );
+                ivLin.clear();
+                }
+            }
+        }
+    }
+
+void SER::stp(
+        )
+    {
+    // Serial2.begin( 4800, SERIAL_8N1, 17, 16 );
+
+    Serial2.setRxBufferSize( 512 );
+    Serial2.setTxBufferSize( 256 );
+
+    Serial2.begin( 4800, SERIAL_8N1, 17, 16, false, 10000UL );
+    }
+
+
+class SIM7000a
+        : public Seq::Task
+    {
+  public:
+    SIM7000a();
+    SIM7000a( const SIM7000a & anObj );
+    ~SIM7000a();
+
+    SIM7000a & operator = ( const SIM7000a & anObj );
+
+    void lp();
+    void stp();
+
+  private:
+    void _init();
+    };
+
+SIM7000a::SIM7000a(
+        )
+    {
+    Serial.println( "SIM7000a::SIM7000a(entered)" );
+
+    seq_g->reg( *this );
+    }
+
+SIM7000a::SIM7000a( 
+        const SIM7000a & anObj 
+        )
+    {
+    }
+
+SIM7000a::~SIM7000a(
+        )
+    {
+    }
+
+SIM7000a & SIM7000a::operator = ( 
+        const SIM7000a & anObj 
+        )
+    {
+    if ( this != &anObj )
+        {
+        }
+
+    return *this;
+    }
+
+void SIM7000a::lp(
+        )
+    {
+    static SM * sm = SM::instance();
+
+    sm->tick();
+    }
+
+void SIM7000a::stp(
+        )
+    {
+    _init();
+    }
+
+static const char * _stateFlow =
+            "event init ST_RESET\n"
+            "event rdy\n"
+
+            "state ST_RESET Send AT+CFUN=1,1 10\n"
+            "event error ST_RESET_DELAY\n"
+            "event ok\n"
+            "event rdy ST_RESET_1a\n"
+            "event timeout ST_RESET_DELAY\n"
+
+            "state ST_RESET_DELAY Tmo 5\n"
+            "event timeout ST_RESET\n"
+
+            "state ST_RESET_1a ClearQs\n"
+            "event ok ST_RESET_1\n"
+
+            "state ST_RESET_1 Send AT 10\n"
+            "event at\n"
+            "event ok   ST_RESET_2\n"
+            "event rdy  ST_RESET_2\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_2 Send ATE0 10\n"
+            "event ok   ST_RESET_3\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_3 Send AT+CENG=0 10\n"
+            "event ok   ST_RESET_4\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_4 Send AT+CFUN? 10\n"
+            "event ok   ST_RESET_5\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_5 Send AT+CREG=1 10\n"
+            "event ok   ST_RESET_6\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_6 Send AT+COPS=? 60\n"
+            "event ok   ST_RESET_7\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_7 Send AT+CPIN? 10\n"
+            "event ok   ST_RESET_8\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_8 Send AT+CSQ 10\n"
+            "event ok   ST_RESET_9\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_9 Send AT+CNMP? 10\n"
+            "event ok   ST_RESET_10\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_10 Send AT+CMNB? 10\n"
+            "event ok   ST_RESET_11\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_11 Send AT+CPSI? 30\n"
+            "event ok   ST_RESET_11a\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_11a Send AT+CBANDCFG=\"CAT-M\",13 10\n"
+            "event ok ST_RESET_12\n"
+
+            "state ST_RESET_12 Send AT+CBANDCFG? 10\n"
+            "event ok   ST_RESET_13\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_13 Send AT+CNACT=1,\"vzwinternet\" 60\n"
+            "event error ST_RESET_14\n"
+            "event ok   ST_RESET_14\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_14 Send AT+CREG? 10\n"
+            "event ok   ST_RESET_15\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_15 Send AT+SMSTATE? 10\n"
+            "event ok   ST_RESET_17\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_17 ClearCaptureStack\n"
+            "event ok   ST_RESET_18\n"
+
+            "state ST_RESET_18 Send AT+CIMI 10\n"
+            "event ok   ST_RESET_19a\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_19a SaveIMI\n"
+            "event ok   ST_RESET_19\n"
+
+            "state ST_RESET_19 Send AT+CCID 10\n"
+            "event ok   ST_RESET_20\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_20 SaveIMSI\n"
+            "event ok ST_RESET_21\n"
+
+            "state ST_RESET_21 Send AT+GSN 10\n"
+            "event ok   ST_RESET_22\n"
+            "event tmo  ST_RESET_1\n"
+
+            "state ST_RESET_22 SaveIMEI\n"
+            "event ok ST_RESET_23\n"
+
+            "state ST_RESET_23 Send AT+CGNSPWR=1 10\n"
+            "event ok ST_RESET_24\n"
+
+            "state ST_RESET_24 Send AT+CSTT=\"vzwinternet\" 10\n"
+            "event error ST_RESET_25\n"
+            "event ok ST_RESET_25\n"
+
+            "state ST_RESET_25 Send AT+CNACT? 60\n"
+            "event ok ST_RESET_26\n"
+            "event tmo ST_RESET_24\n"
+
+            "state ST_RESET_26 Send AT+CMCFG? 60\n"
+            "event ok ST_RESET_27\n"
+            "event tmo ST_RESET_25\n"
+
+            "state ST_RESET_27 Send AT+COPS=? 60\n"
+            "event ok CHK_INIT\n"
+            "event tmo ST_RESET_26\n"
+
+            "state ST_RESET_28 LogTokens COPS\n"
+            "event ok CHK_INIT_1\n"
+
+            "state ST_INIT_1 LogTokens IMEIIMSI,IMI\n"
+            "event ok CHK_INIT_2\n"
+
+            "state ST_INIT_2 LogTokens IMSI,IMI\n"
+            "event ok CHK_INIT_3\n"
+
+            "state ST_INIT_3 LogTokens IMI\n"
+            "event ok CHK_INIT\n"
+
+            "state CHK_INIT Branch CREG\n"
+            "event 1 CHK_INIT_CNACT\n"
+            "event 1,1 CHK_INIT_CNACT\n"
+            "event 0,1 CHK_INIT_CNACT\n"
+
+            "state CHK_INIT_CNACT ParseCSV CNACT CNACT\n"
+            "event ok CHK_INIT_CNACT_1\n"
+
+            "state CHK_INIT_CNACT_1 Branch CNACT-0\n"
+            "event 0 CHK_SND_CNACT_2\n"
+            "event 1 CHK_INIT_SMSTATE\n"
+
+            "state CHK_SND_CNACT_2 Branch CNACT_SENT\n"
+            "event noValue CHK_SND_CNACTSND_0\n"
+            "event SENT WAIT_PDP\n"
+
+            "state CHK_SND_CNACTSND_0 Set CNACT_SENT SENT\n"
+            "event ok CHK_SND_CNACT\n"
+
+            "state CHK_SND_CNACT Send AT+CNACT=1 60\n"
+            "event ok CHK_INIT_CNACT\n"
+            
+            "state WAIT_PDP DumpTokens\n"
+            "event ok WAIT_PDP_DELAY\n"
+
+            "state WAIT_PDP_DELAY Tmo 10\n"
+            "event tmo WAIT_PDP_DELAY_RETRY\n"
+
+            "state WAIT_PDP_DELAY_RETRY Send AT+CNACT? 60\n"
+            "event ok CHK_INIT_CNACT\n"
+
+            "state CHK_INIT_SMSTATE Branch SMSTATE\n"
+            "event 0 CFG_MQTT\n"
+            "event 1 WAIT_GPS\n"
+        
+            "state CFG_MQTT Send AT+SMCONF=\"URL\",104.237.137.91,1883 30\n"
+            "event ok CFG_MQTT_1\n"
+            "event tmo ST_RESET\n"
+
+            "state CFG_MQTT_1 Send AT+SMCONF=\"CLIENTID\",\"SIM7000A-${IMSI:-12345}\" 30\n"
+            "event ok  CFG_MQTT_2\n"
+            "event tmo ST_RESET\n"
+
+            "state CFG_MQTT_2 Send AT+SMCONF=\"KEEPTIME\",60 30\n"
+            "event ok CFG_MQTT_3\n"
+            "event tmo ST_RESET\n"
+
+            "state CFG_MQTT_3 Send AT+SMCONN 60\n"
+            "event ok CFG_MQTT_4\n"
+            "event tmo ST_RESET\n"
+
+            "state CFG_MQTT_4 Send AT+SMSUB=\"/SIM7000/MGMT\",0 30\n"
+            "event ok Main_Loop\n"
+            "event tmo CFG_MQTT_3\n"
+
+            "state Main_Loop SMPUB 30\n"
+            "event error ST_RESET\n"
+            "event ok Main_Loop\n"
+            "event tmo RD_STATE\n"
+            "event empty RD_STATE\n"
+            "event smsub RD_STATE\n"
+
+            "state RD_STATE Interval 1\n"
+            "event expired RD_STATE_1\n"
+            "event ok CHK_SMSUB\n"
+
+            "state RD_STATE_1 Send AT+CCLK? 10\n"
+            "event error RD_STATE_100\n"
+            "event ok RD_STATE_101\n"
+
+            "state RD_STATE_100 Interval 60\n"
+            "event expired RD_STATE_101\n"
+            "event ok CHK_SMSUB\n"
+
+            "state RD_STATE_101 Send AT+CPSI? 30\n"
+            "event error RD_STATE_102\n"
+            "event ok RD_STATE_102\n"
+            "event tmo Main_Loop\n"
+
+            "state RD_STATE_102  Send AT+CGNSINF 10\n"
+            "event error RD_STATE_2\n"
+            "event ok CHK_SMSUB\n"
+            "event tmo CHK_SMSUB\n"
+
+            "state CHK_SMSUB_TMO LogTokens IMSI\n"
+            "event ok Main_Loop\n"
+
+            "state RD_STATE_2  LogTokens CCLK\n"
+            "event ok CHK_SMSUB\n"
+
+            "state CHK_SMSUB_T0 Tmo 30\n"
+            "event tmo CHK_SMSUB_TMO\n"
+
+            "state CHK_SMSUB ParseSMSUB SMSUB CMD\n"
+            "event noValue Main_Loop\n"
+            "event ok CHK_SMSUB_1\n"
+
+            "state CHK_SMSUB_1 Branch CMD\n"
+            "event noValue Main_Loop\n"
+            "event CHK Main_Loop\n"
+            "event ok Main_Loop\n"
+            ;
+
+void SIM7000a::_init(
+        )
+    {
+    static std::string _init( "init" );
+
+    SM * sm = SM::instance();
+    
+    sm->setVerbose( 1 );
+
+    sm->load( _stateFlow );
+
+
+    Serial.printf( "Signal( init )(main loop)\n" );
+    sm->signal( _init );
+    }
+
+static SER _ser;
+static SENG _stFlow( "repo.sheepshed.tk", "/StateFlow/SIM7000A.stateflow" );
+static RTLIMIT _rtLimit;
+
+#ifdef USE_HTTPSERVER
+static void _info(
+        AsyncWebServerRequest * aRQ 
+        )
+    {
+    Serial.println( "_info(entered)" );
+    
+    String msg;
+
+    msg = "_info(entered)\n";
+    msg += "PROG: ";
+    msg += PROG;
+    msg += "\n";
+
+    aRQ->send( 200, "text/plain", msg );
+    }
+
+static void _hello(
+        AsyncWebServerRequest * aRQ 
+        )
+    {
+    Serial.println( "_hello(entered)" );
+    aRQ->send( 200, "text/plain", "Hello" );
+    }
+
+static void _notFound(
+        AsyncWebServerRequest * aRQ
+        )
+    {
+    Serial.println( "_notFound(entered)" );
+    aRQ->send( 404, "text/plain", "Not found" );
+    }
+
+static void _reboot(
+        AsyncWebServerRequest * aRQ
+        )
+    {
+    aRQ->send( 200, "text/plain", "reboot" );
+    delay( 1000 );
+    ESP.restart();
+    }
+
+static void _sendMQTT(
+        AsyncWebServerRequest * aRQ
+        )
+    {
+    Serial.println( "_sendMQTT(entered)" );
+
+    String payload;
+    String topic;
+
+    if ( aRQ->hasParam( "topic", true ) )
+        {
+        topic = aRQ->getParam( "payload", true ) -> value();
+        }
+    else
+        {
+        topic = "/log/";
+        topic += _mac;
+        }
+
+    if ( aRQ->hasParam( "payload", true ) )
+        {
+        payload = aRQ->getParam( "payload", true ) -> value();
+        }
+    else
+        {
+        payload = "no payload";
+        }
+
+    Serial.print( "topic: " ); Serial.println( topic );
+    Serial.print( "payload: " ); Serial.println( payload );
+    
+    aRQ->send( 200, "text/plain", 
+            "topic: " + topic + "\n"
+            + "Payload: " + payload + "\n"
+            + "MAC: " + _mac + "\n"  );
+
+    Msg * m = new Msg( Msg::t_pub );
+    m->ivPayload = payload.c_str();
+    xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+
+    _mqtt.publish( topic.c_str(), "%s", payload.c_str() );
+    }
+
+#endif
+
 void setup(
         )
     {
-#ifdef USE_BLINK
-    static Blink b;
+#ifdef USE_SOFTAP
+    WiFi.mode( WIFI_MODE_APSTA );
+    WiFi.softAP( "GW", "4026892842" );
+#ifdef USE_SOFTAP_CB
+    WiFi.onEvent( _softAP_cb );
 #endif
-#ifdef USE_PUBSUB
-    static MQTT mqttm;
 #endif
 
-    seq_g->stp();
+#ifdef USE_BLINK
+static Blink b;
+#endif
+
 
 #ifdef USE_WIFI
     _loadMac();
@@ -446,6 +1223,8 @@ void setup(
         }
 
     Serial.printf( "\r\nCompile: " __DATE__ " " __TIME__ ", mac: %s\r\n", _mac );
+    Serial.print( "ESP32 IP as soft AP: " );
+    Serial.println( WiFi.softAPIP() );
 
 #ifdef USE_WIFI
     _setupWiFi();
@@ -454,6 +1233,21 @@ void setup(
 #ifdef USE_OTA
     _checkUpdate();
 #endif
+
+#ifdef USE_HTTPSERVER
+    static AsyncWebServer _server( 80 );
+
+    _server.on( "/hello", HTTP_GET, _hello );
+    _server.on( "/info", HTTP_GET, _info );
+    _server.on( "/reboot", HTTP_GET, _reboot );
+    _server.on( "/reboot", HTTP_POST, _reboot );
+    _server.on( "/sendMQTT", HTTP_POST, _sendMQTT );
+
+    _server.onNotFound( _notFound );
+    _server.begin();
+#endif
+
+    seq_g->stp();
     }
 
 void loop(
@@ -526,8 +1320,6 @@ static bool ahtEnabled_g = true;
 #define SCANCHKINV  60
 #define UARTPORT    UART_NUM_2
 
-SemaphoreHandle_t qMut_g;
-
 static const char * stateFlow_g =
             "event init ST_RESET\n"
             "event rdy\n"
@@ -586,7 +1378,7 @@ static const char * stateFlow_g =
             "event ok   ST_RESET_11\n"
             "event tmo  ST_RESET_1\n"
 
-            "state ST_RESET_11 Send AT+CPSI? 10\n"
+            "state ST_RESET_11 Send AT+CPSI? 30\n"
             "event ok   ST_RESET_11a\n"
             "event tmo  ST_RESET_1\n"
 
@@ -650,12 +1442,13 @@ static const char * stateFlow_g =
             "state ST_RESET_27 Send AT+COPS=? 60\n"
             "event ok ST_RESET_28\n"
 
-            "state ST_RESET_28 LogTokens COPS,IMEI,IMSI,IMI\n"
+            "state ST_RESET_28 LogTokens COPS\n"
             "event ok CHK_INIT\n"
 
             "state CHK_INIT Branch CREG\n"
             "event 1 CHK_INIT_CNACT\n"
             "event 1,1 CHK_INIT_CNACT\n"
+            "event 1,3 CHK_INIT_CNACT\n"
             "event 0,1 CHK_INIT_CNACT\n"
 
             "state CHK_INIT_CNACT ParseCSV CNACT CNACT\n"
@@ -704,7 +1497,7 @@ static const char * stateFlow_g =
             "event ok CFG_MQTT_4\n"
             "event tmo ST_RESET\n"
 
-            "state CFG_MQTT_4 Send AT+SMSUB=\"/SIM7000/MGMT/${IMSI}\",0 30\n"
+            "state CFG_MQTT_4 Send AT+SMSUB=\"/SIM7000/MGMT\",0 30\n"
             "event ok Main_Loop\n"
 
             "state Main_Loop SMPUB 30\n"
@@ -726,7 +1519,7 @@ static const char * stateFlow_g =
             "event expired RD_STATE_101\n"
             "event ok CHK_SMSUB\n"
 
-            "state RD_STATE_101 Send AT+CPSI? 10\n"
+            "state RD_STATE_101 Send AT+CPSI? 30\n"
             "event error RD_STATE_102\n"
             "event ok RD_STATE_102\n"
             "event tmo Main_Loop\n"
@@ -907,6 +1700,7 @@ static void _setupWiFi(
         if ( WiFi.status() == WL_CONNECTED )
             {
             Serial.printf( "'%s', CONNECTED\r\n", _current->ssid );
+            Serial.print( "LocalIP: " ); Serial.println( WiFi.localIP() );
             break;
             }
         }
@@ -1123,23 +1917,6 @@ static void _setupESPNOW(
     }
 
 
-void _runSF(
-        void * aParam
-        )
-    {
-    static std::string _init( "init" );
-
-    SM * sm = SM::instance();
-    
-    sm->load( stateFlow_g );
-
-    for( ; ; )
-        {
-        Serial.printf( "Signal( init )(main loop)\n" );
-        sm->signal( _init );
-        }
-    }
-
 void setup(
         ) 
     {
@@ -1151,7 +1928,6 @@ void setup(
     delay( 1000 );
     Serial.printf( "Compile: " __DATE__ " " __TIME__ ", mac: %s\r\n", _mac );
 
-    qMut_g = xSemaphoreCreateMutex();
     pinMode( LED, OUTPUT );
 
     bool ledState = false;
@@ -1642,10 +2418,8 @@ static void _prcs(
     if ( aLin == "> " )
         {
         {
-        Locker l( qMut_g, __FILE__, __LINE__ );
         msg = sq->pop();
         }
-
     
         if ( sm->getVerbose() )
             {
@@ -1701,8 +2475,6 @@ static void _prcs(
 
 
     {
-    Locker l( qMut_g, __FILE__, __LINE__ );
-
     while ( cs->depth() >= 5 )
         {
         Serial.printf( "pop to make room.\r\n" );
@@ -1874,6 +2646,7 @@ void loop(
             lin += ch;
             if ( lin == "> " )
                 {
+                Serial.printf( "\r\nReceived Prompt\r\n" );
                 _prcs( lin );
                 lin.clear();
                 continue;

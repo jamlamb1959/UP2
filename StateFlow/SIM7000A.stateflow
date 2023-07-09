@@ -1,0 +1,230 @@
+event init ST_RESET
+event rdy
+
+state ST_RESET Send AT+CFUN=1,1 60
+event error ST_RESET_DELAY
+event ok
+event rdy ST_RESET_1a
+event timeout ST_RESET_DELAY
+
+state ST_RESET_DELAY Tmo 5
+event timeout ST_RESET
+
+state ST_RESET_1a ClearQs
+event ok ST_RESET_1
+
+state ST_RESET_1 Send AT 2
+event at
+event ok ST_RESET_2
+event rdy ST_RESET_2
+event tmo ST_RESET_1
+
+state ST_RESET_2 Send ATE0 10
+event ok ST_RESET_3
+event tmo ST_RESET_1
+
+state ST_RESET_3 Send AT+CENG=0 10
+event ok ST_RESET_4
+event tmo ST_RESET_1
+
+state ST_RESET_4 Send AT+CFUN? 10
+event ok ST_RESET_5
+event tmo ST_RESET_1
+
+state ST_RESET_5 Send AT+CREG=1 10
+event ok ST_RESET_6
+event tmo ST_RESET_1
+
+state ST_RESET_6 Send AT+COPS=? 30
+event ok ST_RESET_7
+event error
+event tmo ST_RESET_1
+
+state ST_RESET_7 Send AT+CPIN? 10
+event ok ST_RESET_8
+event tmo ST_RESET_1
+
+state ST_RESET_8 Send AT+CSQ 10
+event ok ST_RESET_9
+event tmo ST_RESET_1
+
+state ST_RESET_9 Send AT+CNMP? 10
+event ok ST_RESET_10
+event tmo ST_RESET_1
+
+state ST_RESET_10 Send AT+CMNB? 10
+event ok ST_RESET_11
+event tmo ST_RESET_1
+
+state ST_RESET_11 Send AT+CPSI? 10
+event ok ST_RESET_11a
+event tmo ST_RESET_1
+
+state ST_RESET_11a Send AT+CBANDCFG="CAT-M",13 10
+event ok ST_RESET_12
+
+state ST_RESET_12 Send AT+CBANDCFG? 10
+event ok ST_RESET_13
+event tmo ST_RESET_1
+
+state ST_RESET_13 Send AT+CNACT=1,"vzwinternet" 60
+event error ST_RESET_14
+event ok ST_RESET_14
+event tmo ST_RESET_1
+
+state ST_RESET_14 Send AT+CREG? 10
+event ok ST_RESET_15
+event tmo ST_RESET_1
+
+state ST_RESET_15 Send AT+SMSTATE? 10
+event ok ST_RESET_17
+event tmo ST_RESET_1
+
+state ST_RESET_17 ClearCaptureStack
+event ok ST_RESET_18
+
+state ST_RESET_18 Send AT+CIMI 10
+event ok ST_RESET_19a
+event tmo ST_RESET_1
+
+state ST_RESET_19a SaveIMI
+event ok ST_RESET_19
+
+state ST_RESET_19 Send AT+CCID 10
+event ok ST_RESET_20
+event tmo ST_RESET_1
+
+state ST_RESET_20 SaveIMSI
+event ok ST_RESET_21
+
+state ST_RESET_21 Send AT+GSN 10
+event ok ST_RESET_22
+event tmo ST_RESET_1
+
+state ST_RESET_22 SaveIMEI
+event ok ST_RESET_23
+
+state ST_RESET_23 Send AT+CGNSPWR=1 10
+event ok ST_RESET_24
+
+state ST_RESET_24 Send AT+CSTT="vzwinternet" 10
+event error ST_RESET_25
+event ok ST_RESET_25
+
+state ST_RESET_25 Send AT+CNACT? 60
+event ok ST_RESET_26
+
+state ST_RESET_26 Send AT+CMCFG? 60
+event ok ST_RESET_27
+
+state ST_RESET_27 Send AT+COPS=? 60
+event ok ST_RESET_28
+
+state ST_RESET_28 LogTokens COPS,IMEI,IMSI,IMI
+event ok CHK_INIT
+
+state CHK_INIT Branch CREG
+event 1 CHK_INIT_CNACT
+event 1,1 CHK_INIT_CNACT
+event 1,2 CHK_INIT_0
+event 0,1 CHK_INIT_CNACT
+
+state CHK_INIT_0 Send AT+CREG? 10
+event ok CHK_INIT
+event tmo CHK_INIT_0
+
+state CHK_INIT_CNACT ParseCSV CNACT CNACT
+event ok CHK_INIT_CNACT_1
+
+state CHK_INIT_CNACT_1 Branch CNACT-0
+event 0 CHK_SND_CNACT_2
+event 1 CHK_INIT_SMSTATE
+
+state CHK_SND_CNACT_2 Branch CNACT_SENT
+event noValue CHK_SND_CNACTSND_0
+event SENT WAIT_PDP
+
+state CHK_SND_CNACTSND_0 Set CNACT_SENT SENT
+event ok CHK_SND_CNACT
+
+state CHK_SND_CNACT Send AT+CNACT=1 60
+event ok CHK_INIT_CNACT
+
+state WAIT_PDP DumpTokens
+event ok WAIT_PDP_DELAY
+
+state WAIT_PDP_DELAY Tmo 10
+event tmo WAIT_PDP_DELAY_RETRY
+
+state WAIT_PDP_DELAY_RETRY Send AT+CNACT? 60
+event ok CHK_INIT_CNACT
+
+state CHK_INIT_SMSTATE Branch SMSTATE
+event 0 CFG_MQTT
+event 1 WAIT_GPS
+
+state CFG_MQTT Send AT+SMCONF="URL",104.237.137.91,1883 30
+event ok CFG_MQTT_1
+event tmo ST_RESET
+
+state CFG_MQTT_1 Send AT+SMCONF="CLIENTID","SIM7000A-${IMSI:-12345}" 30
+event ok CFG_MQTT_2
+event tmo ST_RESET
+
+state CFG_MQTT_2 Send AT+SMCONF="KEEPTIME",60 30
+event ok CFG_MQTT_3
+event tmo ST_RESET
+
+state CFG_MQTT_3 Send AT+SMCONN 60
+event ok CFG_MQTT_4
+event tmo ST_RESET
+
+state CFG_MQTT_4 Send AT+SMSUB="/SIM7000/MGMT/${IMSI}",0 30
+event ok Main_Loop
+
+state Main_Loop SMPUB 10
+event error ST_RESET
+event ok Main_Loop
+event tmo RD_STATE
+event empty RD_STATE
+event smsub RD_STATE
+
+state RD_STATE Interval 1
+event expired RD_STATE_1
+event ok CHK_SMSUB
+
+state RD_STATE_1 Send AT+CCLK? 10
+event error RD_STATE_100
+event ok RD_STATE_101
+
+state RD_STATE_100 Interval 60
+event expired RD_STATE_101
+event ok CHK_SMSUB
+
+state RD_STATE_101 Send AT+CPSI? 10
+event error RD_STATE_102
+event ok RD_STATE_102
+event tmo Main_Loop
+
+state RD_STATE_102 Send AT+CGNSINF 10
+event error RD_STATE_2
+event ok CHK_SMSUB
+event tmo CHK_SMSUB
+
+state CHK_SMSUB_TMO LogTokens IMEI,IMSI,IMI
+event ok CHK_SMSUB
+
+state RD_STATE_2 LogTokens CCLK
+event ok CHK_SMSUB
+
+state CHK_SMSUB_T0 Tmo 10
+event tmo Main_Loop
+
+state CHK_SMSUB ParseSMSUB SMSUB CMD
+event noValue CHK_SMSUB_T0
+event ok CHK_SMSUB_1
+
+state CHK_SMSUB_1 Branch CMD
+event noValue Main_Loop
+event CHK Main_Loop
+event ok Main_Loop

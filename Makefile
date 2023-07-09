@@ -9,7 +9,7 @@ DEST=repo.sheepshed.tk
 PLATFORM=esp32dev
 PROJ=UP2
 
-all: push
+all: .stateflow push
 
 clean:
 	pio run --target clean
@@ -33,7 +33,11 @@ upload:
 monitor:
 	pio device monitor
 
-mu: upload monitor
+.stateflow:
+	scp StateFlow/SIM7000A.stateflow ${DEST}:/var/www/html/StateFlow/SIM7000A.stateflow
+	mosquitto_pub -h ${BROKER} -t "/MGMT_UP2" -m "reboot"
+
+mu: .stateflow upload monitor
 
 
 
