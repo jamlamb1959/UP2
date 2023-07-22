@@ -366,33 +366,86 @@ static void _setupPubSub(
 #endif
 #ifdef USE_SOFTAP_CB
 static void _softAP_cb(
-        WiFiEvent_t anEvent
+        WiFiEvent_t anEvent,
+        WiFiEventInfo_t anInfo
         )
     {
-    Serial.printf( "_softAP_cb(entered) anEvent: %d\r\n", anEvent );
+    (void) anInfo;
+
+    Serial.printf( "_softAP_cb(entered) anEvent: (%d)", anEvent );
 
     switch ( anEvent )
         {
+        case SYSTEM_EVENT_WIFI_READY:
+            Serial.print( "SYSTEM_EVENT_WIFI_READY" );
+            break;
+
+        case SYSTEM_EVENT_SCAN_DONE:
+            Serial.print( "SYSTEM_EVENT_SCAN_DONE" );
+            break;
+
+        case SYSTEM_EVENT_STA_START:
+            Serial.print( "SYSTEM_EVENT_STA_START" );
+            break;
+
+        case SYSTEM_EVENT_STA_STOP:
+            Serial.print( "SYSTEM_EVENT_STA_STOP" );
+            break;
+
         case SYSTEM_EVENT_STA_CONNECTED:
-            Serial.println( "SYSTEM_EVENT_STA_CONNECTED" );
+            Serial.print( "SYSTEM_EVENT_STA_CONNECTED" );
+            break;
+
+        case SYSTEM_EVENT_STA_DISCONNECTED:
+            Serial.print( "SYSTEM_EVENT_STA_DISCONNECTED" );
+            break;
+
+        case SYSTEM_EVENT_STA_AUTHMODE_CHANGE:
+            Serial.print( "SYSTEM_EVENT_STA_AUTHMODE_CHANGE" );
+            break;
+
+        case SYSTEM_EVENT_STA_GOT_IP:
+            Serial.print( "SYSTEM_EVENT_STA_GOT_IP" );
+            break;
+
+        case SYSTEM_EVENT_STA_LOST_IP:
+            Serial.print( "SYSTEM_EVENT_STA_LOST_IP" );
             break;
 
         case SYSTEM_EVENT_AP_START:
-            Serial.println( "SYSTEM_EVENT_AP_START" );
+            Serial.print( "SYSTEM_EVENT_AP_START" );
+            break;
+
+        case SYSTEM_EVENT_AP_STOP:
+            Serial.print( "SYSTEM_EVENT_AP_STOP" );
             break;
 
         case SYSTEM_EVENT_AP_STACONNECTED:
-            Serial.println( "SYSTEM_EVENT_AP_STACONNECTED" );
+            Serial.print( "SYSTEM_EVENT_AP_STACONNECTED" );
             break;
 
         case SYSTEM_EVENT_AP_STADISCONNECTED:
-            Serial.println( "SYSTEM_EVENT_AP_STADISCONNECTED" );
+            Serial.print( "SYSTEM_EVENT_AP_STADISCONNECTED" );
+            break;
+
+        case SYSTEM_EVENT_STA_WPS_ER_TIMEOUT:
+            Serial.print( "SYSTEM_EVENT_WPS_ER_TIMEOUT" );
+            break;
+
+        case SYSTEM_EVENT_STA_WPS_ER_PIN:
+            Serial.print( "SYSTEM_EVENT_WPS_ER_PIN" );
+            break;
+
+        case SYSTEM_EVENT_STA_WPS_ER_PBC_OVERLAP:
+            Serial.print( "SYSTEM_EVENT_WPS_ER_PBC_OVERLAP" );
             break;
 
         default:
-            Serial.println( "default:" );
+            Serial.print( "default" );
             break;
         }
+
+    Serial.println( "" );
     }
 #endif
 
@@ -457,15 +510,19 @@ void UDPSeq::lp(
     {
     char pktBuffer[ 256 ];
 
+    int lim = 5;
     int ln;
     int pktSize;
 
-    while( (pktSize = ivUDP.parsePacket()) != 0 )
+    while( lim > 0 && (pktSize = ivUDP.parsePacket()) != 0 )
         {
+        Serial.print( "lim: " ); Serial.println( lim );
         Serial.print( "pktSize: " ); Serial.println( pktSize );
 
-        IPAddress remoteIp = ivUDP.remoteIP();
-        Serial.print( "remoteIp: " ); Serial.println( remoteIp );
+        lim --;
+
+        // IPAddress remoteIp = ivUDP.remoteIP();
+        // Serial.print( "remoteIp: " ); Serial.println( remoteIp );
         
         ln = ivUDP.read( pktBuffer, sizeof( pktBuffer ) );
         if ( ln > 0 )
@@ -490,6 +547,75 @@ void UDPSeq::stp(
     }
 
 static UDPSeq _udp( 1959 );
+
+class TCPSeq
+        : public Seq::Task
+    {
+  public:
+    TCPSeq( const int aPort = 1960 );
+    TCPSeq( const TCPSeq & anObj );
+    ~TCPSeq();
+
+    TCPSeq & operator = ( const TCPSeq & anObj );
+
+    void lp();
+    void stp();
+
+  private:
+    int ivPort;
+
+    WiFiServer ivServer;
+    };
+
+TCPSeq::TCPSeq( 
+        const int aPort
+        )
+        : ivPort( aPort )
+        , ivServer( aPort )
+    {
+    seq_g->reg( *this );
+    }
+
+TCPSeq::TCPSeq( 
+        const TCPSeq & anObj 
+        )
+    {
+    (void) anObj;
+    }
+
+TCPSeq::~TCPSeq(
+        )
+    {
+    }
+    
+TCPSeq & TCPSeq::operator = ( 
+        const TCPSeq & anObj 
+        )
+    {
+    if ( this != &anObj )
+        { 
+        } 
+    return *this; 
+    }
+
+void TCPSeq::lp(
+         )
+    {
+    int avail;
+
+    WiFiClient clnt = ivServer.available();
+
+    avail = clnt.available();
+    
+    Serial.print( "avail: " ); Serial.print( avail );
+    }
+
+void TCPSeq::stp() 
+    {
+    ivServer.begin();
+    }
+
+static TCPSeq _tcpSeq;
 
 class SER
         : public Seq::Task
@@ -782,327 +908,9 @@ void SER::stp(
     Serial2.begin( 4800, SERIAL_8N1, 17, 16, false, 10000UL );
     }
 
-
-class SIM7000a
-        : public Seq::Task
-    {
-  public:
-    SIM7000a();
-    SIM7000a( const SIM7000a & anObj );
-    ~SIM7000a();
-
-    SIM7000a & operator = ( const SIM7000a & anObj );
-
-    void lp();
-    void stp();
-
-  private:
-    void _init();
-    };
-
-SIM7000a::SIM7000a(
-        )
-    {
-    Serial.println( "SIM7000a::SIM7000a(entered)" );
-
-    seq_g->reg( *this );
-    }
-
-SIM7000a::SIM7000a( 
-        const SIM7000a & anObj 
-        )
-    {
-    }
-
-SIM7000a::~SIM7000a(
-        )
-    {
-    }
-
-SIM7000a & SIM7000a::operator = ( 
-        const SIM7000a & anObj 
-        )
-    {
-    if ( this != &anObj )
-        {
-        }
-
-    return *this;
-    }
-
-void SIM7000a::lp(
-        )
-    {
-    static SM * sm = SM::instance();
-
-    sm->tick();
-    }
-
-void SIM7000a::stp(
-        )
-    {
-    _init();
-    }
-
-static const char * _stateFlow =
-            "event init ST_RESET\n"
-            "event rdy\n"
-
-            "state ST_RESET Send AT+CFUN=1,1 10\n"
-            "event error ST_RESET_DELAY\n"
-            "event ok\n"
-            "event rdy ST_RESET_1a\n"
-            "event timeout ST_RESET_DELAY\n"
-
-            "state ST_RESET_DELAY Tmo 5\n"
-            "event timeout ST_RESET\n"
-
-            "state ST_RESET_1a ClearQs\n"
-            "event ok ST_RESET_1\n"
-
-            "state ST_RESET_1 Send AT 10\n"
-            "event at\n"
-            "event ok   ST_RESET_2\n"
-            "event rdy  ST_RESET_2\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_2 Send ATE0 10\n"
-            "event ok   ST_RESET_3\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_3 Send AT+CENG=0 10\n"
-            "event ok   ST_RESET_4\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_4 Send AT+CFUN? 10\n"
-            "event ok   ST_RESET_5\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_5 Send AT+CREG=1 10\n"
-            "event ok   ST_RESET_6\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_6 Send AT+COPS=? 60\n"
-            "event ok   ST_RESET_7\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_7 Send AT+CPIN? 10\n"
-            "event ok   ST_RESET_8\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_8 Send AT+CSQ 10\n"
-            "event ok   ST_RESET_9\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_9 Send AT+CNMP? 10\n"
-            "event ok   ST_RESET_10\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_10 Send AT+CMNB? 10\n"
-            "event ok   ST_RESET_11\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_11 Send AT+CPSI? 30\n"
-            "event ok   ST_RESET_11a\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_11a Send AT+CBANDCFG=\"CAT-M\",13 10\n"
-            "event ok ST_RESET_12\n"
-
-            "state ST_RESET_12 Send AT+CBANDCFG? 10\n"
-            "event ok   ST_RESET_13\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_13 Send AT+CNACT=1,\"vzwinternet\" 60\n"
-            "event error ST_RESET_14\n"
-            "event ok   ST_RESET_14\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_14 Send AT+CREG? 10\n"
-            "event ok   ST_RESET_15\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_15 Send AT+SMSTATE? 10\n"
-            "event ok   ST_RESET_17\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_17 ClearCaptureStack\n"
-            "event ok   ST_RESET_18\n"
-
-            "state ST_RESET_18 Send AT+CIMI 10\n"
-            "event ok   ST_RESET_19a\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_19a SaveIMI\n"
-            "event ok   ST_RESET_19\n"
-
-            "state ST_RESET_19 Send AT+CCID 10\n"
-            "event ok   ST_RESET_20\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_20 SaveIMSI\n"
-            "event ok ST_RESET_21\n"
-
-            "state ST_RESET_21 Send AT+GSN 10\n"
-            "event ok   ST_RESET_22\n"
-            "event tmo  ST_RESET_1\n"
-
-            "state ST_RESET_22 SaveIMEI\n"
-            "event ok ST_RESET_23\n"
-
-            "state ST_RESET_23 Send AT+CGNSPWR=1 10\n"
-            "event ok ST_RESET_24\n"
-
-            "state ST_RESET_24 Send AT+CSTT=\"vzwinternet\" 10\n"
-            "event error ST_RESET_25\n"
-            "event ok ST_RESET_25\n"
-
-            "state ST_RESET_25 Send AT+CNACT? 60\n"
-            "event ok ST_RESET_26\n"
-            "event tmo ST_RESET_24\n"
-
-            "state ST_RESET_26 Send AT+CMCFG? 60\n"
-            "event ok ST_RESET_27\n"
-            "event tmo ST_RESET_25\n"
-
-            "state ST_RESET_27 Send AT+COPS=? 60\n"
-            "event ok CHK_INIT\n"
-            "event tmo ST_RESET_26\n"
-
-            "state ST_RESET_28 LogTokens COPS\n"
-            "event ok CHK_INIT_1\n"
-
-            "state ST_INIT_1 LogTokens IMEIIMSI,IMI\n"
-            "event ok CHK_INIT_2\n"
-
-            "state ST_INIT_2 LogTokens IMSI,IMI\n"
-            "event ok CHK_INIT_3\n"
-
-            "state ST_INIT_3 LogTokens IMI\n"
-            "event ok CHK_INIT\n"
-
-            "state CHK_INIT Branch CREG\n"
-            "event 1 CHK_INIT_CNACT\n"
-            "event 1,1 CHK_INIT_CNACT\n"
-            "event 0,1 CHK_INIT_CNACT\n"
-
-            "state CHK_INIT_CNACT ParseCSV CNACT CNACT\n"
-            "event ok CHK_INIT_CNACT_1\n"
-
-            "state CHK_INIT_CNACT_1 Branch CNACT-0\n"
-            "event 0 CHK_SND_CNACT_2\n"
-            "event 1 CHK_INIT_SMSTATE\n"
-
-            "state CHK_SND_CNACT_2 Branch CNACT_SENT\n"
-            "event noValue CHK_SND_CNACTSND_0\n"
-            "event SENT WAIT_PDP\n"
-
-            "state CHK_SND_CNACTSND_0 Set CNACT_SENT SENT\n"
-            "event ok CHK_SND_CNACT\n"
-
-            "state CHK_SND_CNACT Send AT+CNACT=1 60\n"
-            "event ok CHK_INIT_CNACT\n"
-            
-            "state WAIT_PDP DumpTokens\n"
-            "event ok WAIT_PDP_DELAY\n"
-
-            "state WAIT_PDP_DELAY Tmo 10\n"
-            "event tmo WAIT_PDP_DELAY_RETRY\n"
-
-            "state WAIT_PDP_DELAY_RETRY Send AT+CNACT? 60\n"
-            "event ok CHK_INIT_CNACT\n"
-
-            "state CHK_INIT_SMSTATE Branch SMSTATE\n"
-            "event 0 CFG_MQTT\n"
-            "event 1 WAIT_GPS\n"
-        
-            "state CFG_MQTT Send AT+SMCONF=\"URL\",104.237.137.91,1883 30\n"
-            "event ok CFG_MQTT_1\n"
-            "event tmo ST_RESET\n"
-
-            "state CFG_MQTT_1 Send AT+SMCONF=\"CLIENTID\",\"SIM7000A-${IMSI:-12345}\" 30\n"
-            "event ok  CFG_MQTT_2\n"
-            "event tmo ST_RESET\n"
-
-            "state CFG_MQTT_2 Send AT+SMCONF=\"KEEPTIME\",60 30\n"
-            "event ok CFG_MQTT_3\n"
-            "event tmo ST_RESET\n"
-
-            "state CFG_MQTT_3 Send AT+SMCONN 60\n"
-            "event ok CFG_MQTT_4\n"
-            "event tmo ST_RESET\n"
-
-            "state CFG_MQTT_4 Send AT+SMSUB=\"/SIM7000/MGMT\",0 30\n"
-            "event ok Main_Loop\n"
-            "event tmo CFG_MQTT_3\n"
-
-            "state Main_Loop SMPUB 30\n"
-            "event error ST_RESET\n"
-            "event ok Main_Loop\n"
-            "event tmo RD_STATE\n"
-            "event empty RD_STATE\n"
-            "event smsub RD_STATE\n"
-
-            "state RD_STATE Interval 1\n"
-            "event expired RD_STATE_1\n"
-            "event ok CHK_SMSUB\n"
-
-            "state RD_STATE_1 Send AT+CCLK? 10\n"
-            "event error RD_STATE_100\n"
-            "event ok RD_STATE_101\n"
-
-            "state RD_STATE_100 Interval 60\n"
-            "event expired RD_STATE_101\n"
-            "event ok CHK_SMSUB\n"
-
-            "state RD_STATE_101 Send AT+CPSI? 30\n"
-            "event error RD_STATE_102\n"
-            "event ok RD_STATE_102\n"
-            "event tmo Main_Loop\n"
-
-            "state RD_STATE_102  Send AT+CGNSINF 10\n"
-            "event error RD_STATE_2\n"
-            "event ok CHK_SMSUB\n"
-            "event tmo CHK_SMSUB\n"
-
-            "state CHK_SMSUB_TMO LogTokens IMSI\n"
-            "event ok Main_Loop\n"
-
-            "state RD_STATE_2  LogTokens CCLK\n"
-            "event ok CHK_SMSUB\n"
-
-            "state CHK_SMSUB_T0 Tmo 30\n"
-            "event tmo CHK_SMSUB_TMO\n"
-
-            "state CHK_SMSUB ParseSMSUB SMSUB CMD\n"
-            "event noValue Main_Loop\n"
-            "event ok CHK_SMSUB_1\n"
-
-            "state CHK_SMSUB_1 Branch CMD\n"
-            "event noValue Main_Loop\n"
-            "event CHK Main_Loop\n"
-            "event ok Main_Loop\n"
-            ;
-
-void SIM7000a::_init(
-        )
-    {
-    static std::string _init( "init" );
-
-    SM * sm = SM::instance();
-    
-    sm->setVerbose( 1 );
-
-    sm->load( _stateFlow );
-
-
-    Serial.printf( "Signal( init )(main loop)\n" );
-    sm->signal( _init );
-    }
-
 static SER _ser;
-static SENG _stFlow( "repo.sheepshed.tk", "/StateFlow/SIM7000A.stateflow" );
-static RTLIMIT _rtLimit;
+static SENG _stFlow( "repo.sheepshed.tk", "/StateFlow/SIM7000A.stateflow", 10 );
+// static RTLIMIT _rtLimit;
 
 #ifdef USE_HTTPSERVER
 static void _info(
@@ -1126,13 +934,13 @@ static void _hello(
         )
     {
     Serial.println( "_hello(entered)" );
-    aRQ->send( 200, "text/plain", "Hello" );
-    }
+    aRQ->send( 200, "text/plain", "Hello" ); 
+    } 
 
-static void _notFound(
+static void _notFound( 
         AsyncWebServerRequest * aRQ
-        )
-    {
+        ) 
+    { 
     Serial.println( "_notFound(entered)" );
     aRQ->send( 404, "text/plain", "Not found" );
     }
@@ -1189,6 +997,27 @@ static void _sendMQTT(
     _mqtt.publish( topic.c_str(), "%s", payload.c_str() );
     }
 
+static void _postPic(
+        AsyncWebServerRequest * aRQ
+        )
+    {
+    String rsp;
+
+    Serial.println( "_postPic(entered)" );
+
+    rsp = "_postPic:\r\n";
+
+    rsp += "_version: ";
+    rsp += String( aRQ->version() );
+    rsp += "\r\n";
+
+    rsp += "_method: ";
+    rsp += String( aRQ->methodToString() );
+    rsp += "\r\n";
+
+    aRQ->send( 200, "text/plain", rsp.c_str() );
+    }
+
 #endif
 
 void setup(
@@ -1242,6 +1071,7 @@ static Blink b;
     _server.on( "/reboot", HTTP_GET, _reboot );
     _server.on( "/reboot", HTTP_POST, _reboot );
     _server.on( "/sendMQTT", HTTP_POST, _sendMQTT );
+    _server.on( "/postPic", HTTP_POST, _postPic );
 
     _server.onNotFound( _notFound );
     _server.begin();
