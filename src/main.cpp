@@ -60,8 +60,8 @@ typedef struct
 static WiFiInfo _wifiInfo[] =
     {
     { "s1616", "4026892842", "192.168.11.43" },
-    { "Jimmy-MiFi", "4026892842", "repo.sheepshed.tk" },
-    { "sheepshed-mifi", "4026892842", "repo.sheepshed.tk" },
+    // { "Jimmy-MiFi", "4026892842", "repo.sheepshed.tk" },
+    // { "sheepshed-mifi", "4026892842", "repo.sheepshed.tk" },
     { "lambhome", "4022890568", "192.168.11.43" },
     { NULL, NULL, NULL }
     };
@@ -508,6 +508,8 @@ UDPSeq & UDPSeq::operator = (
 void UDPSeq::lp(
         )
     {
+    static SM * sm = SM::instance();
+
     char pktBuffer[ 256 ];
 
     int lim = 5;
@@ -521,16 +523,19 @@ void UDPSeq::lp(
 
         lim --;
 
-        // IPAddress remoteIp = ivUDP.remoteIP();
-        // Serial.print( "remoteIp: " ); Serial.println( remoteIp );
+        IPAddress remoteIp = ivUDP.remoteIP();
+        Serial.print( "remoteIp: " ); Serial.println( remoteIp );
         
         ln = ivUDP.read( pktBuffer, sizeof( pktBuffer ) );
         if ( ln > 0 )
             {
             pktBuffer[ ln ] = '\0';
+            Serial.print( "pktBuffer: " ); Serial.println( pktBuffer );
+
             Msg * m = new Msg( Msg::t_pub );
             m->ivPayload = pktBuffer;
-            xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+            sm->writeSMPUB( (void *) m );
+            // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
             }
         }
     }
@@ -607,7 +612,10 @@ void TCPSeq::lp(
 
     avail = clnt.available();
     
-    Serial.print( "avail: " ); Serial.print( avail );
+    if ( avail != 0 )
+        {
+        Serial.print( "avail: " ); Serial.println( avail );
+        }
     }
 
 void TCPSeq::stp() 
@@ -680,10 +688,7 @@ static void _prcs(
 
     std::string msg;
 
-    if ( sm->getVerbose() )
-        {
-        Serial.printf( "R: '%s'\r\n", aLin.c_str() );
-        }
+    Serial.printf( "R: '%s'\r\n", aLin.c_str() );
 
     if ( _current != NULL )
         {
@@ -765,11 +770,9 @@ static void _prcs(
             Serial.printf( "%s(%d): '%s' (malformed)\r\n", __FILE__, __LINE__, aLin.c_str() );
             }
 
-        if ( SMPUB_g != NULL )
-            {
-            Msg * m = new Msg( Msg::t_smpub );
-            xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
-            }
+        Msg * m = new Msg( Msg::t_smpub );
+        sm->writeSMPUB( (void *) m );
+        // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
         }
 
     if ( (aLin == "SMS Ready")
@@ -792,7 +795,6 @@ static void _prcs(
         msg = sq->pop();
         }
 
-    
         if ( sm->getVerbose() )
             {
             Serial.printf( "(prompted) S: (%u) %s\r\n", msg.length(), msg.c_str() );
@@ -958,6 +960,8 @@ static void _sendMQTT(
         AsyncWebServerRequest * aRQ
         )
     {
+    static SM * sm = SM::instance();
+
     Serial.println( "_sendMQTT(entered)" );
 
     String payload;
@@ -992,7 +996,8 @@ static void _sendMQTT(
 
     Msg * m = new Msg( Msg::t_pub );
     m->ivPayload = payload.c_str();
-    xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+    sm->writeSMPUB( (void *) m );
+    // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
 
     _mqtt.publish( topic.c_str(), "%s", payload.c_str() );
     }
@@ -1647,7 +1652,8 @@ static void _onDataRecv(
             {
             Msg * m = new Msg( Msg::t_pub );
             m->ivPayload.assign( wp, aLen );
-            xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+            sm->writeSMPUB( (void *) m );
+            // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
             }
         else
             {
@@ -1675,7 +1681,8 @@ static void _onDataRecv(
                     {
                     Msg * m = new Msg( Msg::t_pub );
                     m->ivPayload = wp;
-                    xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+                    sm->writeSMPUB( (void *) m );
+                    // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
                     }
 
                     break;
@@ -2097,7 +2104,8 @@ static void _getData(
 
                     Msg * m = new Msg( Msg::t_pub );
                     m->ivPayload = buf;
-                    xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+                    sm->writeSMPUB( (void) m );
+                    // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
                     }
                 }
             }
@@ -2139,10 +2147,7 @@ static void _prcs(
 
     std::string msg;
 
-    if ( sm->getVerbose() )
-        {
-        Serial.printf( "R: '%s'\r\n", aLin.c_str() );
-        }
+    Serial.printf( "R: '%s'\r\n", aLin.c_str() );
 
     if ( _current != NULL )
         {
@@ -2224,11 +2229,9 @@ static void _prcs(
             Serial.printf( "%s(%d): '%s' (malformed)\r\n", __FILE__, __LINE__, aLin.c_str() );
             }
 
-        if ( SMPUB_g != NULL )
-            {
-            Msg * m = new Msg( Msg::t_smpub );
-            xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
-            }
+        Msg * m = new Msg( Msg::t_smpub );
+        sm->writeSMPUB( (void *) m );
+        // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
         }
 
     if ( (aLin == "SMS Ready")
@@ -2434,7 +2437,8 @@ void loop(
 
         Msg * m = new Msg( Msg::t_pub );
         m->ivPayload = buf;
-        xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
+        sm->writeSMPUB( (void *) m );
+        // xQueueGenericSend( SMPUB_g, &m, 1000, queueSEND_TO_BACK );
         }
 #endif
 
