@@ -61,9 +61,13 @@ typedef struct
 static WiFiInfo _wifiInfo[] =
     {
     // { "Jimmy-MiFi", "4026892842", "repo.sheepshed.tk" },
-    { "sheepshed-mifi", "4026892842", "repo.sheepshed.tk" },
     { "s1616", "4026892842", "192.168.11.43" },
     { "lambhome", "4022890568", "192.168.11.43" },
+    { "GW4026892842", "40268928", "pharmdata.ddns.net" },
+    { "GW4026892842-1", "40268928", "pharmdata.ddns.net" },
+    { "GW4026892842-2", "40268928", "pharmdata.ddns.net" },
+    { "GW4026892842-3", "40268928", "pharmdata.ddns.net" },
+    { "sheepshed-mifi", "4026892842", "pharmdata.ddns.net" },
     { NULL, NULL, NULL }
     };
 
@@ -1519,7 +1523,30 @@ static void _setupWiFi(
     {
     bool ledState = false;
 
+    int numSsid;
+    int ssidIdx;
     int cnt;
+
+    Serial.println( "_setupWiFi(entered) - scanNetworks" );
+    if ( _current != NULL )
+        {
+        Serial.println( "WiFi is already setup." );
+        return;
+        }
+
+    numSsid = WiFi.scanNetworks();
+    if ( numSsid <= 0 )
+        {
+        Serial.println( "no WiFi networks available." );
+        return;
+        }
+    
+    for( ssidIdx = 0; ssidIdx < numSsid; ssidIdx ++ )
+        {
+        Serial.print( "SSID: " ); Serial.print( WiFi.SSID( ssidIdx ) );
+        Serial.print( ", RSSI: (" ); Serial.print( WiFi.RSSI( ssidIdx ) );
+            Serial.println( ")" );
+        }
 
     for( _current = _wifiInfo; _current->ssid != NULL; _current ++ )
         {
