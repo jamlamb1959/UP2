@@ -28,6 +28,7 @@
 #define PROG "firmware/main/esp32dev/UP2/firmware"
 
 #include <Arduino.h>
+
 #include <HardwareSerial.h>
 #include <map>
 #include <string>
@@ -59,9 +60,9 @@ typedef struct
 
 static WiFiInfo _wifiInfo[] =
     {
-    { "s1616", "4026892842", "192.168.11.43" },
     // { "Jimmy-MiFi", "4026892842", "repo.sheepshed.tk" },
-    // { "sheepshed-mifi", "4026892842", "repo.sheepshed.tk" },
+    { "sheepshed-mifi", "4026892842", "repo.sheepshed.tk" },
+    { "s1616", "4026892842", "192.168.11.43" },
     { "lambhome", "4022890568", "192.168.11.43" },
     { NULL, NULL, NULL }
     };
@@ -792,7 +793,11 @@ static void _prcs(
     if ( aLin == "> " )
         {
         {
-        msg = sq->pop();
+        if ( ! sq->pop( msg ) )
+            {
+            Serial.println( "sq empty" );
+            return;
+            }
         }
 
         if ( sm->getVerbose() )
