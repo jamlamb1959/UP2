@@ -920,7 +920,7 @@ void SER::stp(
     }
 
 static SER _ser;
-static SENG _stFlow( "repo.sheepshed.tk", "/StateFlow/SIM7000A.stateflow", 10 );
+static SENG _stFlow( "pharmdata.ddns.net", "/StateFlow/SIM7000A.stateflow", 10 );
 // static RTLIMIT _rtLimit;
 
 #ifdef USE_HTTPSERVER
