@@ -1,5 +1,6 @@
 event init ST_RESET
 event rdy
+event tdb
 event tmo ST_RESET
 
 state ST_RESET Send AT+CFUN=1,1 30
@@ -155,6 +156,7 @@ state WAIT_PDP DumpTokens
 event ok WAIT_PDP_DELAY
 
 state WAIT_PDP_DELAY Tmo 10
+event tdb WAIT_PDP_DELAY_RETRY
 event tmo WAIT_PDP_DELAY_RETRY
 
 state WAIT_PDP_DELAY_RETRY Send AT+CNACT? 60

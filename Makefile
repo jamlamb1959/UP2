@@ -38,7 +38,6 @@ data/SIM7000A.stateflow: StateFlow/SIM7000A.stateflow
 
 .stateflow: data/SIM7000A.stateflow
 	scp StateFlow/SIM7000A.stateflow ${DEST}:/var/www/html/StateFlow/SIM7000A.stateflow
-	mosquitto_pub -h ${BROKER} -t "/MGMT_UP2" -m "reboot"
 
 mu: .stateflow upload monitor
 
