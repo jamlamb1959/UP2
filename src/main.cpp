@@ -1099,9 +1099,11 @@ static const char * _st =
 "event ok Main_Loop\r\n";
 
 static SER _ser;
+
 static SENG _stFlow( _st, 10 );
+
 // static SENG _stFlow( "pharmdata.ddns.net", "/StateFlow/SIM7000A.stateflow", 0 );
-// static RTLIMIT _rtLimit;
+static RTLIMIT _rtLimit;
 
 #ifdef USE_HTTPSERVER
 static void _info(
