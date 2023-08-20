@@ -678,7 +678,7 @@ SER & SER::operator = (
     return *this;
     }
 
-#define SIGNAL( sigVal ) sm->signal( sigVal ); return
+#define SIGNAL( sigVal ) Serial.print( "signal " ); Serial.println( sigVal ); sm->signal( sigVal ); return
 
 static void _prcs(
         const std::string & aLin
@@ -851,6 +851,10 @@ static void _prcs(
             std::string val( wp + 2 );
 
             tdb->put( tknName, val );
+
+            Serial.printf( "%s(%d): tdb signaled\r\n", __FILE__, __LINE__ );
+    
+            SIGNAL( "tdb" );
             }
         else
             {
@@ -1461,7 +1465,7 @@ static void _progress(
 static void _checkUpdate(
         )
     {
-    Serial.printf( "(%d) _checkUpdate - (repo: %s) file: %s\r\n", 
+    Serial.printf( "\r\n\n(%d) _checkUpdate - (repo: %s) file: %s\r\n", 
             __LINE__, (_current != NULL) ? _current->firmwareRepo : "NULL", PROG );
 
     if ( _current != NULL )

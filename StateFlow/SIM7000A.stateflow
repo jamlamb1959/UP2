@@ -154,7 +154,7 @@ event ok CHK_INIT_CNACT
 state WAIT_PDP DumpTokens
 event ok WAIT_PDP_DELAY
 
-state WAIT_PDP_DELAY Tmo 30
+state WAIT_PDP_DELAY Tmo 10
 event tmo WAIT_PDP_DELAY_RETRY
 
 state WAIT_PDP_DELAY_RETRY Send AT+CNACT? 60
