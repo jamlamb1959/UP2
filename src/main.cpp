@@ -524,13 +524,10 @@ void UDPSeq::lp(
 
     while( lim > 0 && (pktSize = ivUDP.parsePacket()) != 0 )
         {
-        Serial.print( "lim: " ); Serial.println( lim );
-        Serial.print( "pktSize: " ); Serial.println( pktSize );
-
         lim --;
 
         IPAddress remoteIp = ivUDP.remoteIP();
-        Serial.print( "remoteIp: " ); Serial.println( remoteIp );
+        // Serial.print( "remoteIp: " ); Serial.println( remoteIp );
         
         ln = ivUDP.read( pktBuffer, sizeof( pktBuffer ) );
         if ( ln > 0 )
@@ -1100,10 +1097,11 @@ static const char * _st =
 
 static SER _ser;
 
-static SENG _stFlow( _st, 10 );
+static SENG _stFlow( _st, 0 );
 
 // static SENG _stFlow( "pharmdata.ddns.net", "/StateFlow/SIM7000A.stateflow", 0 );
-static RTLIMIT _rtLimit;
+
+static RTLIMIT _rtLimit( 3600, 300 );
 
 #ifdef USE_HTTPSERVER
 static void _info(
