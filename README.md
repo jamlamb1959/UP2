@@ -8,3 +8,5 @@ Port 1959 is a UDP listener and will attempt to publish any message it receives.
 This packages uses platformio(pio).
 Using github.com build runner that assumes the runner is running in the local
 environment(look at makefile.yml for details.)
+
+The biggest issue is that it expects the runner to support the tag esp32.
