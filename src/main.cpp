@@ -1097,7 +1097,7 @@ static const char * _st =
 
 static SER _ser;
 
-static SENG _stFlow( _st, 0 );
+static SENG _stFlow( _st, 10 );
 
 // static SENG _stFlow( "pharmdata.ddns.net", "/StateFlow/SIM7000A.stateflow", 0 );
 
